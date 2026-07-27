@@ -95,6 +95,8 @@ func CCLFloodFill(g *interfaces.BinaryImage) *interfaces.LabelImage {
 				comp.Horizontal = trimH
 				comp.Vertical = trimV
 
+				comp.ChainCode = ComputeChainCode(g, &comp)
+
 				labelImage.Components = append(labelImage.Components, comp)
 				currentLabel++
 			}

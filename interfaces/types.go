@@ -72,6 +72,7 @@ type Component struct {
 	SumY       int
 	Horizontal []int
 	Vertical   []int
+	ChainCode  []uint8
 }
 
 type LabelImage struct {
