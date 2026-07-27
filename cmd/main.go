@@ -85,15 +85,18 @@ func main() {
 				if wordIdx > 0 {
 					fmt.Print(" ")
 				}
+				var wordRunes []rune
 				for _, compIdx := range word.Components {
 					fv := vectors[compIdx]
 					if store != nil {
 						match := store.Classify(fv)
-						fmt.Printf("%c", match.Char)
+						wordRunes = append(wordRunes, match.Char)
 					} else {
-						fmt.Printf("[C%d]", compIdx)
+						wordRunes = append(wordRunes, '?')
 					}
 				}
+				corrected := contextualCorrectWord(string(wordRunes))
+				fmt.Print(corrected)
 			}
 			fmt.Println()
 		}

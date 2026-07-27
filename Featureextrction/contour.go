@@ -16,11 +16,8 @@ func computeContourStats(chain []uint8, perimeter int) ContourStats {
 	var stats ContourStats
 
 	for i := 0; i < len(chain); i++ {
-		prev := chain[(i-1+len(chain))%len(chain)]
 		curr := chain[i]
 		next := chain[(i+1)%len(chain)]
-
-		_ = prev
 
 		turnRight := (next - curr + 8) % 8
 		if turnRight == 2 || turnRight == 6 {

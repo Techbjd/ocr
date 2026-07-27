@@ -27,9 +27,9 @@ func computeHoles(g *interfaces.BinaryImage, comp *interfaces.Component) int {
 				visited[idx] = true
 				continue
 			}
-		TouchesEdge := false
-			floodBg(g, visited, x, y, comp.MinX, comp.MinY, bboxW, bboxH, &TouchesEdge)
-			if !TouchesEdge {
+			touchesEdge := false
+			floodBg(g, visited, x, y, comp.MinX, comp.MinY, bboxW, bboxH, &touchesEdge)
+			if !touchesEdge {
 				holes++
 			}
 		}
