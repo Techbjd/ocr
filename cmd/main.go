@@ -5,21 +5,31 @@ import (
 	"fmt"
 	"image"
 	"image/draw"
-	"image/jpeg"
-	"image/png"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/Techbjd/ocr/grayscale"
 	"github.com/Techbjd/ocr/interfaces"
 	labeledimage "github.com/Techbjd/ocr/LabeledImage"
 	"github.com/Techbjd/ocr/NoiseRemoval"
-
-	_ "image/png"
+	featureextraction "github.com/Techbjd/ocr/Featureextrction"
+	"github.com/Techbjd/ocr/Classifier"
+	"github.com/Techbjd/ocr/Segmentation"
 )
 
 func main() {
-	data, err := os.ReadFile("photo.png")
+	if len(os.Args) < 2 {
+		log.Fatal("usage: ocr <image> [templates.json]")
+	}
+
+	imagePath := os.Args[1]
+	templatePath := ""
+	if len(os.Args) >= 3 {
+		templatePath = os.Args[2]
+	}
+
+	data, err := os.ReadFile(imagePath)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -34,7 +44,6 @@ func main() {
 	draw.Draw(rgbaImg, rgbaImg.Bounds(), img, img.Bounds().Min, draw.Src)
 
 	bounds := rgbaImg.Bounds()
-
 	rawImage := interfaces.RGBAImage{
 		Pix:    rgbaImg.Pix,
 		Stride: rgbaImg.Stride,
@@ -46,47 +55,110 @@ func main() {
 
 	grayImage := grayscale.ConvertToGrayscale(rawImage)
 	binaryImage := grayscale.ThresholdToBinaryImage(grayImage)
-
 	denoised := noiseremoval.RemoveNoise(binaryImage)
-
 	labelImage := labeledimage.CCLFloodFill(denoised)
 
-	for i, comp := range labelImage.Components {
-		fmt.Printf("Component %d: bbox=[%d,%d]x[%d,%d] area=%d\n",
-			comp.Label, comp.MinX, comp.MinY, comp.MaxX, comp.MaxY, comp.Area)
-		fmt.Printf("  H-proj: %v\n", comp.Horizontal)
-		fmt.Printf("  V-proj: %v\n", comp.Vertical)
+	var store *classifier.TemplateStore
+	if templatePath != "" {
+		store, err = classifier.LoadTemplates(templatePath)
+		if err != nil {
+			log.Printf("No templates loaded: %v", err)
+		} else {
+			log.Printf("Loaded %d templates from %s", len(store.Templates), templatePath)
+		}
+	}
 
-		if i >= 4 {
-			fmt.Println("  ...")
+	vectors := make([]featureextraction.FeatureVector, len(labelImage.Components))
+	for i, comp := range labelImage.Components {
+		vectors[i] = featureextraction.Extract(denoised, &comp)
+	}
+
+	page := segmentation.AnalyzeLayout(labelImage)
+
+	fmt.Println("--- Detected Text ---")
+	for pi, para := range page.Paragraphs {
+		if pi > 0 {
+			fmt.Println()
+		}
+		for _, line := range para.Lines {
+			for wordIdx, word := range line.Words {
+				if wordIdx > 0 {
+					fmt.Print(" ")
+				}
+				for _, compIdx := range word.Components {
+					fv := vectors[compIdx]
+					if store != nil {
+						match := store.Classify(fv)
+						fmt.Printf("%c", match.Char)
+					} else {
+						fmt.Printf("[C%d]", compIdx)
+					}
+				}
+			}
+			fmt.Println()
+		}
+	}
+	fmt.Println("--- End ---")
+
+	fmt.Printf("\n--- Page Layout ---\n")
+	fmt.Printf("Image: %dx%d\n", page.Width, page.Height)
+	fmt.Printf("Paragraphs: %d\n", len(page.Paragraphs))
+	for pi, para := range page.Paragraphs {
+		fmt.Printf("  Paragraph %d: %d lines\n", pi+1, len(para.Lines))
+		for li, line := range para.Lines {
+			words := 0
+			chars := 0
+			for _, w := range line.Words {
+				words++
+				chars += len(w.Components)
+			}
+			fmt.Printf("    Line %d: %d words, %d chars\n", li+1, words, chars)
+		}
+	}
+
+	fmt.Printf("\n--- Component Details (%d) ---\n", len(labelImage.Components))
+	for i, comp := range labelImage.Components {
+		fv := vectors[i]
+		fmt.Printf("C%d: area=%d perim=%d asp=%.2f den=%.2f holes=%d euler=%d\n",
+			comp.Label, fv.Area, fv.Perimeter, fv.AspectRatio, fv.Density, fv.Holes, fv.EulerNumber)
+		fmt.Printf("  contour: corners=%d changes=%d straight=%d curved=%d compact=%.3f\n",
+			fv.Corners, fv.DirectionChanges, fv.StraightSegments, fv.CurvedSegments, fv.Compactness)
+		fmt.Printf("  skeleton: endpoints=%d junctions=%d h-str=%d v-str=%d diag=%d\n",
+			fv.Endpoints, fv.Junctions, fv.HorizontalStrokes, fv.VerticalStrokes, fv.DiagonalStrokes)
+		fmt.Printf("  graph: edges=%d cycles=%d avgEdge=%.1f straight=%.2f\n",
+			fv.GraphEdges, fv.GraphCycles, fv.GraphMeanEdgeLen, fv.GraphMeanStraight)
+
+		if i >= 19 {
+			fmt.Printf("  ... (%d more)\n", len(labelImage.Components)-20)
 			break
 		}
 	}
 
-	outFile, err := os.Create("grayscale.jpg")
-	if err != nil {
-		log.Fatal(err)
+	if templatePath == "" {
+		fmt.Println("\nNo templates loaded.")
+		fmt.Println("  Recognize: ocr <image> templates.json")
+		fmt.Println("  Train:     train <image> templates.json")
 	}
-	defer outFile.Close()
+}
 
-	if err := jpeg.Encode(outFile, grayImage, &jpeg.Options{Quality: 90}); err != nil {
-		log.Fatal(err)
+func contextualCorrectWord(word string) string {
+	if len(word) == 0 {
+		return word
 	}
-	log.Println("Grayscale conversion complete.")
 
-	binFile, err := os.Create("binary.png")
-	if err != nil {
-		log.Fatal(err)
+	lower := strings.ToLower(word)
+
+	if _, ok := classifier.CommonWords[lower]; ok {
+		return lower
 	}
-	defer binFile.Close()
 
-	w := binaryImage.Rect.Max.X - binaryImage.Rect.Min.X
-	h := binaryImage.Rect.Max.Y - binaryImage.Rect.Min.Y
-	binImg := image.NewGray(image.Rect(0, 0, w, h))
-	copy(binImg.Pix, binaryImage.Pix)
+	corrected := lower
+	corrected = strings.ReplaceAll(corrected, "tl", "th")
+	corrected = strings.ReplaceAll(corrected, "rn", "m")
 
-	if err := png.Encode(binFile, binImg); err != nil {
-		log.Fatal(err)
+	if _, ok := classifier.CommonWords[corrected]; ok {
+		return corrected
 	}
-	log.Println("Binary threshold complete.")
+
+	return corrected
 }
