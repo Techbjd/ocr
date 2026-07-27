@@ -2,15 +2,18 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"image"
 	"image/draw"
 	"image/jpeg"
 	"image/png"
 	"log"
 	"os"
-	"github.com/Techbjd/ocr/grayscale"
 
+	"github.com/Techbjd/ocr/grayscale"
 	"github.com/Techbjd/ocr/interfaces"
+	labeledimage "github.com/Techbjd/ocr/LabeledImage"
+	"github.com/Techbjd/ocr/NoiseRemoval"
 
 	_ "image/png"
 )
@@ -43,6 +46,22 @@ func main() {
 
 	grayImage := grayscale.ConvertToGrayscale(rawImage)
 	binaryImage := grayscale.ThresholdToBinaryImage(grayImage)
+
+	denoised := noiseremoval.RemoveNoise(binaryImage)
+
+	labelImage := labeledimage.CCLFloodFill(denoised)
+
+	for i, comp := range labelImage.Components {
+		fmt.Printf("Component %d: bbox=[%d,%d]x[%d,%d] area=%d\n",
+			comp.Label, comp.MinX, comp.MinY, comp.MaxX, comp.MaxY, comp.Area)
+		fmt.Printf("  H-proj: %v\n", comp.Horizontal)
+		fmt.Printf("  V-proj: %v\n", comp.Vertical)
+
+		if i >= 4 {
+			fmt.Println("  ...")
+			break
+		}
+	}
 
 	outFile, err := os.Create("grayscale.jpg")
 	if err != nil {

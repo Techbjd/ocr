@@ -27,13 +27,19 @@ func CCLFloodFill(g *interfaces.BinaryImage) *interfaces.LabelImage {
 
 			if g.Pix[index] == 0 && labelImage.Labels[index] == 0 {
 				comp := interfaces.Component{
-					Label: currentLabel,
-					MinX:  x,
-					MaxX:  x,
-					MinY:  y,
-					MaxY:  y,
-					Area:  1,
+					Label:      currentLabel,
+					MinX:       x,
+					MaxX:       x,
+					MinY:       y,
+					MaxY:       y,
+					Area:       1,
+					SumX:       x,
+					SumY:       y,
+					Horizontal: make([]int, height),
+					Vertical:   make([]int, width),
 				}
+				comp.Horizontal[y] = 1
+				comp.Vertical[x] = 1
 				labelImage.Labels[index] = currentLabel
 
 				queue := []int{index}
@@ -57,6 +63,10 @@ func CCLFloodFill(g *interfaces.BinaryImage) *interfaces.LabelImage {
 								queue = append(queue, nIndex)
 
 								comp.Area++
+								comp.SumX += nx
+								comp.SumY += ny
+								comp.Horizontal[ny]++
+								comp.Vertical[nx]++
 								if nx < comp.MinX {
 									comp.MinX = nx
 								}
@@ -73,6 +83,17 @@ func CCLFloodFill(g *interfaces.BinaryImage) *interfaces.LabelImage {
 						}
 					}
 				}
+
+				bw := comp.MaxX - comp.MinX + 1
+				bh := comp.MaxY - comp.MinY + 1
+				trimH := make([]int, bh)
+				trimV := make([]int, bw)
+				copy(trimH, comp.Horizontal[comp.MinY:comp.MaxY+1])
+				for i := comp.MinX; i <= comp.MaxX; i++ {
+					trimV[i-comp.MinX] = comp.Vertical[i]
+				}
+				comp.Horizontal = trimH
+				comp.Vertical = trimV
 
 				labelImage.Components = append(labelImage.Components, comp)
 				currentLabel++

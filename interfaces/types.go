@@ -61,14 +61,17 @@ type BinaryImage struct {
 	Rect   Rect
 }
 
-
 type Component struct {
-	Label int
-	MinX  int
-	MaxX  int
-	MinY  int
-	MaxY  int
-	Area  int
+	Label      int
+	MinX       int
+	MaxX       int
+	MinY       int
+	MaxY       int
+	Area       int
+	SumX       int
+	SumY       int
+	Horizontal []int
+	Vertical   []int
 }
 
 type LabelImage struct {
