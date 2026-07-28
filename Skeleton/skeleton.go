@@ -9,12 +9,17 @@ type SkeletonImage struct {
 }
 
 type StructuralFeatures struct {
-	Endpoints        int
-	Junctions        int
+	Endpoints         int
+	Junctions         int
 	HorizontalStrokes int
-	VerticalStrokes  int
-	DiagonalStrokes  int
-	NormalStrokes    int
+	VerticalStrokes   int
+	DiagonalStrokes   int
+	NormalStrokes     int
+}
+
+var zsDirs = [8][2]int{
+	{0, -1}, {1, -1}, {1, 0}, {1, 1},
+	{0, 1}, {-1, 1}, {-1, 0}, {-1, -1},
 }
 
 func Thin(g *interfaces.BinaryImage) *SkeletonImage {
@@ -28,20 +33,22 @@ func Thin(g *interfaces.BinaryImage) *SkeletonImage {
 	}
 	copy(s.Pix, g.Pix)
 
+	pix := s.Pix
+	stride := s.Stride
+
 	changed := true
+	toRemove := make([]bool, len(pix))
 	for changed {
 		changed = false
 
-		toRemove := make([]bool, len(s.Pix))
-
 		for y := 1; y < h-1; y++ {
+			rowBase := y * stride
 			for x := 1; x < w-1; x++ {
-				idx := y*g.Stride + x
-				if s.Pix[idx] != 0 {
+				idx := rowBase + x
+				if pix[idx] != 0 {
 					continue
 				}
-
-				if zhangSuenCondition(s, x, y, w, h, 1) {
+				if zhangSuenCondition(pix, stride, x, y, 1) {
 					toRemove[idx] = true
 					changed = true
 				}
@@ -49,22 +56,24 @@ func Thin(g *interfaces.BinaryImage) *SkeletonImage {
 		}
 
 		for y := 1; y < h-1; y++ {
+			rowBase := y * stride
 			for x := 1; x < w-1; x++ {
-				idx := y*g.Stride + x
+				idx := rowBase + x
 				if toRemove[idx] {
-					s.Pix[idx] = 255
+					pix[idx] = 255
+					toRemove[idx] = false
 				}
 			}
 		}
 
 		for y := 1; y < h-1; y++ {
+			rowBase := y * stride
 			for x := 1; x < w-1; x++ {
-				idx := y*g.Stride + x
-				if s.Pix[idx] != 0 {
+				idx := rowBase + x
+				if pix[idx] != 0 {
 					continue
 				}
-
-				if zhangSuenCondition(s, x, y, w, h, 2) {
+				if zhangSuenCondition(pix, stride, x, y, 2) {
 					toRemove[idx] = true
 					changed = true
 				}
@@ -72,10 +81,12 @@ func Thin(g *interfaces.BinaryImage) *SkeletonImage {
 		}
 
 		for y := 1; y < h-1; y++ {
+			rowBase := y * stride
 			for x := 1; x < w-1; x++ {
-				idx := y*g.Stride + x
+				idx := rowBase + x
 				if toRemove[idx] {
-					s.Pix[idx] = 255
+					pix[idx] = 255
+					toRemove[idx] = false
 				}
 			}
 		}
@@ -84,70 +95,91 @@ func Thin(g *interfaces.BinaryImage) *SkeletonImage {
 	return s
 }
 
-// 8-connected neighbors in order: N, NE, E, SE, S, SW, W, NW
-// p2 p3 p4
-// p1 P  p5
-// p8 p7 p6
-func zhangSuenCondition(s *SkeletonImage, x, y, w, h, pass int) bool {
-	idx := y*s.Stride + x
-	if s.Pix[idx] != 0 {
+func zhangSuenCondition(pix []uint8, stride, x, y, pass int) bool {
+	idx := y*stride + x
+	if pix[idx] != 0 {
 		return false
 	}
 
-	p := [8]bool{}
-	coords := [8][2]int{
-		{0, -1}, {1, -1}, {1, 0}, {1, 1},
-		{0, 1}, {-1, 1}, {-1, 0}, {-1, -1},
-	}
+	p2 := pix[(y-1)*stride+x] == 0
+	p3 := pix[(y-1)*stride+x+1] == 0
+	p4 := pix[y*stride+x+1] == 0
+	p5 := pix[(y+1)*stride+x+1] == 0
+	p6 := pix[(y+1)*stride+x] == 0
+	p7 := pix[(y+1)*stride+x-1] == 0
+	p8 := pix[y*stride+x-1] == 0
+	p1 := pix[(y-1)*stride+x-1] == 0
 
-	for i, c := range coords {
-		nx, ny := x+c[0], y+c[1]
-		if nx < 0 || nx >= w || ny < 0 || ny >= h {
-			p[i] = false
-		} else {
-			p[i] = s.Pix[ny*s.Stride+nx] == 0
-		}
-	}
-
-	// Count 0→1 transitions
 	transitions := 0
-	for i := 0; i < 8; i++ {
-		next := (i + 1) % 8
-		if !p[i] && p[next] {
-			transitions++
-		}
+	if !p2 && p3 {
+		transitions++
+	}
+	if !p3 && p4 {
+		transitions++
+	}
+	if !p4 && p5 {
+		transitions++
+	}
+	if !p5 && p6 {
+		transitions++
+	}
+	if !p6 && p7 {
+		transitions++
+	}
+	if !p7 && p8 {
+		transitions++
+	}
+	if !p8 && p1 {
+		transitions++
+	}
+	if !p1 && p2 {
+		transitions++
 	}
 	if transitions != 1 {
 		return false
 	}
 
-	// Count black neighbors
 	blackCount := 0
-	for i := 0; i < 8; i++ {
-		if p[i] {
-			blackCount++
-		}
+	if p2 {
+		blackCount++
+	}
+	if p3 {
+		blackCount++
+	}
+	if p4 {
+		blackCount++
+	}
+	if p5 {
+		blackCount++
+	}
+	if p6 {
+		blackCount++
+	}
+	if p7 {
+		blackCount++
+	}
+	if p8 {
+		blackCount++
+	}
+	if p1 {
+		blackCount++
 	}
 	if blackCount < 2 || blackCount > 6 {
 		return false
 	}
 
 	if pass == 1 {
-		// p2, p4, p6 must not all be black
-		if p[0] && p[2] && p[4] {
+		if p2 && p4 && p6 {
 			return false
 		}
-		// p4, p6, p8 must not all be black
-		if p[2] && p[4] && p[6] {
+		if p4 && p6 && p8 {
 			return false
 		}
 	} else {
-		// p2, p4, p8 must not all be black
-		if p[0] && p[2] && p[6] {
+		if p2 && p4 && p8 {
 			return false
 		}
-		// p2, p6, p8 must not all be black
-		if p[0] && p[4] && p[6] {
+		if p2 && p6 && p8 {
 			return false
 		}
 	}
@@ -160,15 +192,17 @@ func AnalyzeStructure(s *SkeletonImage) StructuralFeatures {
 	h := s.Rect.Max.Y - s.Rect.Min.Y
 
 	var sf StructuralFeatures
+	pix := s.Pix
+	stride := s.Stride
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			idx := y*s.Stride + x
-			if s.Pix[idx] != 0 {
+			idx := y*stride + x
+			if pix[idx] != 0 {
 				continue
 			}
 
-			neighbors := countNeighbors(s, x, y, w, h)
+			neighbors := countNeighbors(pix, stride, x, y, w, h)
 
 			switch {
 			case neighbors == 1:
@@ -176,7 +210,7 @@ func AnalyzeStructure(s *SkeletonImage) StructuralFeatures {
 			case neighbors >= 3:
 				sf.Junctions++
 			case neighbors == 2:
-				cls := classifyStroke(s, x, y, w, h)
+				cls := classifyStroke(pix, stride, x, y, w, h)
 				switch cls {
 				case 0:
 					sf.HorizontalStrokes++
@@ -193,7 +227,7 @@ func AnalyzeStructure(s *SkeletonImage) StructuralFeatures {
 	return sf
 }
 
-func countNeighbors(s *SkeletonImage, x, y, w, h int) int {
+func countNeighbors(pix []uint8, stride, x, y, w, h int) int {
 	count := 0
 	for dy := -1; dy <= 1; dy++ {
 		for dx := -1; dx <= 1; dx++ {
@@ -202,7 +236,7 @@ func countNeighbors(s *SkeletonImage, x, y, w, h int) int {
 			}
 			nx, ny := x+dx, y+dy
 			if nx >= 0 && nx < w && ny >= 0 && ny < h {
-				if s.Pix[ny*s.Stride+nx] == 0 {
+				if pix[ny*stride+nx] == 0 {
 					count++
 				}
 			}
@@ -211,16 +245,11 @@ func countNeighbors(s *SkeletonImage, x, y, w, h int) int {
 	return count
 }
 
-// classifyStroke returns 0=horizontal, 1=vertical, 2=diagonal
-func classifyStroke(s *SkeletonImage, x, y, w, h int) int {
+func classifyStroke(pix []uint8, stride, x, y, w, h int) int {
 	type pt struct{ x, y int }
 	var positions [8]pt
-	dirs := [8][2]int{
-		{0, -1}, {1, -1}, {1, 0}, {1, 1},
-		{0, 1}, {-1, 1}, {-1, 0}, {-1, -1},
-	}
 
-	for i, d := range dirs {
+	for i, d := range zsDirs {
 		positions[i] = pt{x + d[0], y + d[1]}
 	}
 
@@ -235,7 +264,7 @@ func classifyStroke(s *SkeletonImage, x, y, w, h int) int {
 
 	for i, p := range positions {
 		if p.x >= 0 && p.x < w && p.y >= 0 && p.y < h {
-			if s.Pix[p.y*s.Stride+p.x] == 0 {
+			if pix[p.y*stride+p.x] == 0 {
 				switch i {
 				case 0:
 					hasUp = true

@@ -21,8 +21,8 @@ type Node struct {
 type Edge struct {
 	From, To   int
 	Length     int
-	Direction  float64 // radians
-	Straight   float64 // 0..1
+	Direction  float64
+	Straight   float64
 }
 
 type StrokeGraph struct {
@@ -30,9 +30,17 @@ type StrokeGraph struct {
 	Edges []Edge
 }
 
+var traceDirs = [8][2]int{
+	{0, -1}, {1, -1}, {1, 0}, {1, 1},
+	{0, 1}, {-1, 1}, {-1, 0}, {-1, -1},
+}
+
 func ExtractGraph(s *SkeletonImage) StrokeGraph {
 	w := s.Rect.Max.X - s.Rect.Min.X
 	h := s.Rect.Max.Y - s.Rect.Min.Y
+
+	pix := s.Pix
+	stride := s.Stride
 
 	visited := make([]bool, w*h)
 	var nodes []Node
@@ -41,12 +49,12 @@ func ExtractGraph(s *SkeletonImage) StrokeGraph {
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			idx := y*s.Stride + x
-			if s.Pix[idx] != 0 || visited[idx] {
+			idx := y*stride + x
+			if pix[idx] != 0 || visited[idx] {
 				continue
 			}
 
-			nb := countNeighbors(s, x, y, w, h)
+			nb := countNeighbors(pix, stride, x, y, w, h)
 			if nb >= 3 {
 				nodes = append(nodes, Node{X: x, Y: y, Type: NodeJunction, ID: nodeID})
 				visited[idx] = true
@@ -62,22 +70,22 @@ func ExtractGraph(s *SkeletonImage) StrokeGraph {
 	visited = make([]bool, w*h)
 
 	for _, n := range nodes {
-		dirs := [][2]int{{0, -1}, {1, -1}, {1, 0}, {1, 1}, {0, 1}, {-1, 1}, {-1, 0}, {-1, -1}}
-		for _, d := range dirs {
+		for _, d := range traceDirs {
 			nx, ny := n.X+d[0], n.Y+d[1]
 			if nx < 0 || nx >= w || ny < 0 || ny >= h {
 				continue
 			}
-			nidx := ny*s.Stride + nx
-			if s.Pix[nidx] != 0 || visited[nidx] {
+			nidx := ny*stride + nx
+			if pix[nidx] != 0 || visited[nidx] {
 				continue
 			}
 
-			if countNeighbors(s, nx, ny, w, h) >= 3 || countNeighbors(s, nx, ny, w, h) == 1 {
+			nb := countNeighbors(pix, stride, nx, ny, w, h)
+			if nb >= 3 || nb == 1 {
 				continue
 			}
 
-			ex, ey, len, pts := traceStroke(s, nx, ny, w, h, visited)
+			ex, ey, ln, pts := traceStroke(pix, stride, nx, ny, w, h, visited)
 			if ex == -1 {
 				continue
 			}
@@ -104,7 +112,7 @@ func ExtractGraph(s *SkeletonImage) StrokeGraph {
 			edges = append(edges, Edge{
 				From:      n.ID,
 				To:        toID,
-				Length:    len,
+				Length:    ln,
 				Direction: dir,
 				Straight:  straight,
 			})
@@ -113,16 +121,16 @@ func ExtractGraph(s *SkeletonImage) StrokeGraph {
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			idx := y*s.Stride + x
-			if s.Pix[idx] != 0 || visited[idx] {
+			idx := y*stride + x
+			if pix[idx] != 0 || visited[idx] {
 				continue
 			}
-			nb := countNeighbors(s, x, y, w, h)
+			nb := countNeighbors(pix, stride, x, y, w, h)
 			if nb != 2 {
 				continue
 			}
 
-			cycleLen, pts := traceCycle(s, x, y, w, h, visited)
+			cycleLen, pts := traceCycle(pix, stride, x, y, w, h, visited)
 			if cycleLen < 4 {
 				continue
 			}
@@ -154,27 +162,25 @@ func ExtractGraph(s *SkeletonImage) StrokeGraph {
 	return StrokeGraph{Nodes: nodes, Edges: edges}
 }
 
-func traceStroke(s *SkeletonImage, startX, startY, w, h int, visited []bool) (int, int, int, [][2]int) {
-	dirs := [][2]int{{0, -1}, {1, -1}, {1, 0}, {1, 1}, {0, 1}, {-1, 1}, {-1, 0}, {-1, -1}}
+func traceStroke(pix []uint8, stride, startX, startY, w, h int, visited []bool) (int, int, int, [][2]int) {
 	cx, cy := startX, startY
-	visited[cy*s.Stride+cx] = true
-	var pts [][2]int
-	pts = append(pts, [2]int{cx, cy})
+	visited[cy*stride+cx] = true
+	pts := [][2]int{{cx, cy}}
 
 	for {
-		nb := countNeighbors(s, cx, cy, w, h)
+		nb := countNeighbors(pix, stride, cx, cy, w, h)
 		if nb >= 3 || nb == 1 {
 			return cx, cy, len(pts), pts
 		}
 
 		found := false
-		for _, d := range dirs {
+		for _, d := range traceDirs {
 			nx, ny := cx+d[0], cy+d[1]
 			if nx < 0 || nx >= w || ny < 0 || ny >= h {
 				continue
 			}
-			nidx := ny*s.Stride + nx
-			if s.Pix[nidx] != 0 || visited[nidx] {
+			nidx := ny*stride + nx
+			if pix[nidx] != 0 || visited[nidx] {
 				continue
 			}
 			visited[nidx] = true
@@ -189,28 +195,26 @@ func traceStroke(s *SkeletonImage, startX, startY, w, h int, visited []bool) (in
 	}
 }
 
-func traceCycle(s *SkeletonImage, startX, startY, w, h int, visited []bool) (int, [][2]int) {
-	dirs := [][2]int{{0, -1}, {1, -1}, {1, 0}, {1, 1}, {0, 1}, {-1, 1}, {-1, 0}, {-1, -1}}
+func traceCycle(pix []uint8, stride, startX, startY, w, h int, visited []bool) (int, [][2]int) {
 	cx, cy := startX, startY
-	visited[cy*s.Stride+cx] = true
-	var pts [][2]int
-	pts = append(pts, [2]int{cx, cy})
+	visited[cy*stride+cx] = true
+	pts := [][2]int{{cx, cy}}
 
 	maxSteps := w * h
 	for step := 0; step < maxSteps; step++ {
-		nb := countNeighbors(s, cx, cy, w, h)
+		nb := countNeighbors(pix, stride, cx, cy, w, h)
 		if nb < 2 {
 			break
 		}
 
 		found := false
-		for _, d := range dirs {
+		for _, d := range traceDirs {
 			nx, ny := cx+d[0], cy+d[1]
 			if nx < 0 || nx >= w || ny < 0 || ny >= h {
 				continue
 			}
-			nidx := ny*s.Stride + nx
-			if s.Pix[nidx] != 0 || visited[nidx] {
+			nidx := ny*stride + nx
+			if pix[nidx] != 0 || visited[nidx] {
 				if nx == startX && ny == startY && len(pts) >= 4 {
 					return len(pts), pts
 				}
@@ -235,9 +239,8 @@ func computeStraightness(pts [][2]int) float64 {
 		return 1.0
 	}
 
-	pts2 := pts
-	start := pts2[0]
-	end := pts2[len(pts2)-1]
+	start := pts[0]
+	end := pts[len(pts)-1]
 
 	dx := float64(end[0] - start[0])
 	dy := float64(end[1] - start[1])
@@ -248,9 +251,9 @@ func computeStraightness(pts [][2]int) float64 {
 	}
 
 	totalCurve := 0.0
-	for i := 1; i < len(pts2); i++ {
-		cx := float64(pts2[i][0] - start[0])
-		cy := float64(pts2[i][1] - start[1])
+	for i := 1; i < len(pts); i++ {
+		cx := float64(pts[i][0] - start[0])
+		cy := float64(pts[i][1] - start[1])
 		dot := (cx*dx + cy*dy) / (lineLen * lineLen)
 		if dot > 1 {
 			dot = 1
@@ -263,7 +266,7 @@ func computeStraightness(pts [][2]int) float64 {
 		totalCurve += dist
 	}
 
-	avgCurve := totalCurve / float64(len(pts2)-1)
+	avgCurve := totalCurve / float64(len(pts)-1)
 	straight := 1.0 - math.Min(avgCurve/2.0, 1.0)
 	return straight
 }
@@ -291,7 +294,6 @@ func GraphFingerprint(g StrokeGraph) GraphFingerprint_ {
 
 	if len(edgeLengths) > 0 {
 		sort.Float64s(edgeLengths)
-		fp.MeanEdgeLength = mean(edgeLengths)
 		fp.MinEdgeLength = edgeLengths[0]
 		fp.MaxEdgeLength = edgeLengths[len(edgeLengths)-1]
 
@@ -342,26 +344,15 @@ func GraphDistance(a, b GraphFingerprint_) float64 {
 	return d
 }
 
-func mean(vals []float64) float64 {
-	if len(vals) == 0 {
-		return 0
-	}
-	s := 0.0
-	for _, v := range vals {
-		s += v
-	}
-	return s / float64(len(vals))
-}
-
 type GraphFingerprint_ struct {
-	EndpointCount    int
-	JunctionCount    int
-	EdgeCount        int
-	Cycles           int
-	MeanEdgeLength   float64
-	MinEdgeLength    float64
-	MaxEdgeLength    float64
-	MeanStraightness float64
+	EndpointCount     int
+	JunctionCount     int
+	EdgeCount         int
+	Cycles            int
+	MeanEdgeLength    float64
+	MinEdgeLength     float64
+	MaxEdgeLength     float64
+	MeanStraightness  float64
 	TotalStrokeLength int
-	TotalEdgeLength  float64
+	TotalEdgeLength   float64
 }

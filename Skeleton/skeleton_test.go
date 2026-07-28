@@ -111,13 +111,13 @@ func TestCountNeighbors(t *testing.T) {
 	s.Pix[1*5+2] = 0
 	s.Pix[3*5+2] = 0
 
-	n := countNeighbors(s, 2, 2, 5, 5)
+	n := countNeighbors(s.Pix, s.Stride, 2, 2, 5, 5)
 	if n != 2 {
 		t.Errorf("expected 2 neighbors, got %d", n)
 	}
 
 	s.Pix[2*5+1] = 0
-	n = countNeighbors(s, 2, 2, 5, 5)
+	n = countNeighbors(s.Pix, s.Stride, 2, 2, 5, 5)
 	if n != 3 {
 		t.Errorf("expected 3 neighbors, got %d", n)
 	}
