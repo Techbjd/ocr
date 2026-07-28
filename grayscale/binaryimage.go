@@ -47,6 +47,10 @@ func computeBlockThresholds(g *interfaces.GrayscaleImage) (grid [][]uint8, nBloc
 		nBlocksY = 1
 	}
 
+	stride := g.Stride
+	pixels := g.Pixels
+	pixLen := len(pixels)
+
 	grid = make([][]uint8, nBlocksY)
 	for by := 0; by < nBlocksY; by++ {
 		grid[by] = make([]uint8, nBlocksX)
@@ -65,13 +69,13 @@ func computeBlockThresholds(g *interfaces.GrayscaleImage) (grid [][]uint8, nBloc
 			var hist [256]int
 			total := 0
 			for y := startY; y < endY; y++ {
-				rowIndex := y * g.Stride
+				rowBase := y * stride
 				for x := startX; x < endX; x++ {
-					srcIndex := rowIndex + x
-					if srcIndex < 0 || srcIndex >= len(g.Pixels) {
+					srcIndex := rowBase + x
+					if srcIndex >= pixLen {
 						continue
 					}
-					hist[g.Pixels[srcIndex]]++
+					hist[pixels[srcIndex]]++
 					total++
 				}
 			}
@@ -79,6 +83,16 @@ func computeBlockThresholds(g *interfaces.GrayscaleImage) (grid [][]uint8, nBloc
 		}
 	}
 	return grid, nBlocksX, nBlocksY
+}
+
+func clamp(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 func interpolatedThreshold(grid [][]uint8, nBlocksX, nBlocksY, relX, relY int) uint8 {
@@ -99,16 +113,6 @@ func interpolatedThreshold(grid [][]uint8, nBlocksX, nBlocksY, relX, relY int) u
 
 	bx1 := bx0 + 1
 	by1 := by0 + 1
-
-	clamp := func(v, lo, hi int) int {
-		if v < lo {
-			return lo
-		}
-		if v > hi {
-			return hi
-		}
-		return v
-	}
 
 	bx0c := clamp(bx0, 0, nBlocksX-1)
 	bx1c := clamp(bx1, 0, nBlocksX-1)
@@ -145,21 +149,26 @@ func ThresholdToBinaryImage(g *interfaces.GrayscaleImage) *interfaces.BinaryImag
 
 	grid, nBlocksX, nBlocksY := computeBlockThresholds(g)
 
-	for y := minY; y < maxY; y++ {
+	stride := g.Stride
+	pixels := g.Pixels
+	pixLen := len(pixels)
+	resultPix := result.Pix
 
+	for y := minY; y < maxY; y++ {
 		relY := y - minY
+		rowBase := relY * stride
 		for x := minX; x < maxX; x++ {
-			srcIndex := (y-minY)*g.Stride + (x - minX)
-			if srcIndex < 0 || srcIndex >= len(g.Pixels) {
+			relX := x - minX
+			srcIndex := rowBase + relX
+			if srcIndex >= pixLen {
 				continue
 			}
-			relX := x - minX
 			threshold := interpolatedThreshold(grid, nBlocksX, nBlocksY, relX, relY)
 
-			if g.Pixels[srcIndex] > threshold {
-				result.Pix[srcIndex] = 255
+			if pixels[srcIndex] > threshold {
+				resultPix[srcIndex] = 255
 			} else {
-				result.Pix[srcIndex] = 0
+				resultPix[srcIndex] = 0
 			}
 		}
 	}
