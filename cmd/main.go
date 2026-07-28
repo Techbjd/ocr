@@ -9,28 +9,63 @@ import (
 	_ "image/png"
 	"log"
 	"os"
+	"os/exec"
 	"strings"
 
-	"github.com/Techbjd/ocr/grayscale"
-	"github.com/Techbjd/ocr/interfaces"
+	"github.com/Techbjd/ocr/Classifier"
+	featureextraction "github.com/Techbjd/ocr/Featureextrction"
 	labeledimage "github.com/Techbjd/ocr/LabeledImage"
 	"github.com/Techbjd/ocr/NoiseRemoval"
-	featureextraction "github.com/Techbjd/ocr/Featureextrction"
-	"github.com/Techbjd/ocr/Classifier"
 	"github.com/Techbjd/ocr/Segmentation"
+	"github.com/Techbjd/ocr/grayscale"
+	"github.com/Techbjd/ocr/interfaces"
 )
 
 func main() {
 	if len(os.Args) < 2 {
-		log.Fatal("usage: ocr <image> [templates.json]")
+		log.Fatal("usage: ocr <image> [templates.json] [-v]")
 	}
 
 	imagePath := os.Args[1]
+	verbose := false
 	templatePath := ""
-	if len(os.Args) >= 3 {
-		templatePath = os.Args[2]
+
+	for _, arg := range os.Args[2:] {
+		if arg == "-v" || arg == "--verbose" {
+			verbose = true
+		} else {
+			templatePath = arg
+		}
 	}
 
+	if templatePath == "" {
+		runTesseract(imagePath)
+		return
+	}
+
+	runCustomPipeline(imagePath, templatePath, verbose)
+}
+
+func runTesseract(imagePath string) {
+	cmd := exec.Command("tesseract", imagePath, "stdout", "-l", "eng+nep", "--psm", "3")
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		log.Fatalf("tesseract failed: %v\n%s", err, stderr.String())
+	}
+
+	text := strings.TrimSpace(out.String())
+	if text == "" {
+		fmt.Println("(no text detected)")
+	} else {
+		fmt.Println(text)
+	}
+}
+
+func runCustomPipeline(imagePath, templatePath string, verbose bool) {
 	data, err := os.ReadFile(imagePath)
 	if err != nil {
 		log.Fatal(err)
@@ -60,15 +95,11 @@ func main() {
 	denoised := noiseremoval.RemoveNoise(binaryImage)
 	labelImage := labeledimage.CCLFloodFill(denoised)
 
-	var sigStore *classifier.SignatureStore
-	if templatePath != "" {
-		sigStore, err = classifier.LoadSignatures(templatePath)
-		if err != nil {
-			log.Printf("No signatures loaded: %v", err)
-		} else {
-			log.Printf("Loaded %d signatures from %s", len(sigStore.Entries), templatePath)
-		}
+	sigStore, err := classifier.LoadSignatures(templatePath)
+	if err != nil {
+		log.Fatalf("Failed to load signatures: %v", err)
 	}
+	log.Printf("Loaded %d signatures from %s", len(sigStore.Entries), templatePath)
 
 	vectors := make([]featureextraction.FeatureVector, len(labelImage.Components))
 	sigs := make([]classifier.CharacterSignature, len(labelImage.Components))
@@ -92,13 +123,9 @@ func main() {
 				}
 				var wordRunes []rune
 				for _, compIdx := range word.Components {
-					if sigStore != nil {
-						ch, score := sigStore.Classify(sigs[compIdx])
-						wordRunes = append(wordRunes, ch)
-						_ = score
-					} else {
-						wordRunes = append(wordRunes, '?')
-					}
+					ch, score := sigStore.Classify(sigs[compIdx])
+					wordRunes = append(wordRunes, ch)
+					_ = score
 				}
 				corrected := contextualCorrectWord(string(wordRunes))
 				fmt.Print(corrected)
@@ -108,44 +135,40 @@ func main() {
 	}
 	fmt.Println("--- End ---")
 
-	fmt.Printf("\n--- Page Layout ---\n")
-	fmt.Printf("Image: %dx%d\n", page.Width, page.Height)
-	fmt.Printf("Paragraphs: %d\n", len(page.Paragraphs))
-	for pi, para := range page.Paragraphs {
-		fmt.Printf("  Paragraph %d: %d lines\n", pi+1, len(para.Lines))
-		for li, line := range para.Lines {
-			words := 0
-			chars := 0
-			for _, w := range line.Words {
-				words++
-				chars += len(w.Components)
+	if verbose {
+		fmt.Printf("\n--- Page Layout ---\n")
+		fmt.Printf("Image: %dx%d\n", page.Width, page.Height)
+		fmt.Printf("Paragraphs: %d\n", len(page.Paragraphs))
+		for pi, para := range page.Paragraphs {
+			fmt.Printf("  Paragraph %d: %d lines\n", pi+1, len(para.Lines))
+			for li, line := range para.Lines {
+				words := 0
+				chars := 0
+				for _, w := range line.Words {
+					words++
+					chars += len(w.Components)
+				}
+				fmt.Printf("    Line %d: %d words, %d chars\n", li+1, words, chars)
 			}
-			fmt.Printf("    Line %d: %d words, %d chars\n", li+1, words, chars)
 		}
-	}
 
-	fmt.Printf("\n--- Component Details (%d) ---\n", len(labelImage.Components))
-	for i, comp := range labelImage.Components {
-		fv := vectors[i]
-		fmt.Printf("C%d: area=%d perim=%d asp=%.2f den=%.2f holes=%d euler=%d\n",
-			comp.Label, fv.Area, fv.Perimeter, fv.AspectRatio, fv.Density, fv.Holes, fv.EulerNumber)
-		fmt.Printf("  contour: corners=%d changes=%d straight=%d curved=%d compact=%.3f\n",
-			fv.Corners, fv.DirectionChanges, fv.StraightSegments, fv.CurvedSegments, fv.Compactness)
-		fmt.Printf("  skeleton: endpoints=%d junctions=%d h-str=%d v-str=%d diag=%d\n",
-			fv.Endpoints, fv.Junctions, fv.HorizontalStrokes, fv.VerticalStrokes, fv.DiagonalStrokes)
-		fmt.Printf("  graph: edges=%d cycles=%d avgEdge=%.1f straight=%.2f\n",
-			fv.GraphEdges, fv.GraphCycles, fv.GraphMeanEdgeLen, fv.GraphMeanStraight)
+		fmt.Printf("\n--- Component Details (%d) ---\n", len(labelImage.Components))
+		for i, comp := range labelImage.Components {
+			fv := vectors[i]
+			fmt.Printf("C%d: area=%d perim=%d asp=%.2f den=%.2f holes=%d euler=%d\n",
+				comp.Label, fv.Area, fv.Perimeter, fv.AspectRatio, fv.Density, fv.Holes, fv.EulerNumber)
+			fmt.Printf("  contour: corners=%d changes=%d straight=%d curved=%d compact=%.3f\n",
+				fv.Corners, fv.DirectionChanges, fv.StraightSegments, fv.CurvedSegments, fv.Compactness)
+			fmt.Printf("  skeleton: endpoints=%d junctions=%d h-str=%d v-str=%d diag=%d\n",
+				fv.Endpoints, fv.Junctions, fv.HorizontalStrokes, fv.VerticalStrokes, fv.DiagonalStrokes)
+			fmt.Printf("  graph: edges=%d cycles=%d avgEdge=%.1f straight=%.2f\n",
+				fv.GraphEdges, fv.GraphCycles, fv.GraphMeanEdgeLen, fv.GraphMeanStraight)
 
-		if i >= 19 {
-			fmt.Printf("  ... (%d more)\n", len(labelImage.Components)-20)
-			break
+			if i >= 19 {
+				fmt.Printf("  ... (%d more)\n", len(labelImage.Components)-20)
+				break
+			}
 		}
-	}
-
-	if templatePath == "" {
-		fmt.Println("\nNo templates loaded.")
-		fmt.Println("  Recognize: ocr <image> templates.json")
-		fmt.Println("  Train:     train <image> templates.json")
 	}
 }
 
