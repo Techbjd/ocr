@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/Techbjd/ocr/Classifier"
@@ -23,10 +24,10 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		log.Fatal("usage: ocr <image> [templates.json] [-v]")
+		log.Fatal("usage: ocr <image-or-pdf> [templates.json] [-v]")
 	}
 
-	imagePath := os.Args[1]
+	inputPath := os.Args[1]
 	verbose := false
 	templatePath := ""
 
@@ -38,12 +39,88 @@ func main() {
 		}
 	}
 
-	if templatePath == "" {
-		runTesseract(imagePath)
+	if isPDF(inputPath) {
+		pages, err := pdfToImages(inputPath)
+		if err != nil {
+			log.Fatalf("PDF conversion failed: %v", err)
+		}
+		defer cleanup(pages)
+
+		for i, pagePath := range pages {
+			if len(pages) > 1 {
+				fmt.Printf("--- Page %d ---\n", i+1)
+			}
+			if templatePath == "" {
+				runTesseract(pagePath)
+			} else {
+				runCustomPipeline(pagePath, templatePath, verbose)
+			}
+		}
 		return
 	}
 
-	runCustomPipeline(imagePath, templatePath, verbose)
+	if templatePath == "" {
+		runTesseract(inputPath)
+		return
+	}
+
+	runCustomPipeline(inputPath, templatePath, verbose)
+}
+
+func isPDF(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	header := make([]byte, 5)
+	if _, err := f.Read(header); err != nil {
+		return false
+	}
+	return string(header) == "%PDF-"
+}
+
+func pdfToImages(pdfPath string) ([]string, error) {
+	tmpDir, err := os.MkdirTemp("", "ocr-pdf-*")
+	if err != nil {
+		return nil, err
+	}
+
+	prefix := filepath.Join(tmpDir, "page")
+	cmd := exec.Command("pdftoppm", "-png", "-r", "300", pdfPath, prefix)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		os.RemoveAll(tmpDir)
+		return nil, fmt.Errorf("pdftoppm: %v\n%s", err, stderr.String())
+	}
+
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		os.RemoveAll(tmpDir)
+		return nil, err
+	}
+
+	var pages []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".png") {
+			pages = append(pages, filepath.Join(tmpDir, e.Name()))
+		}
+	}
+
+	if len(pages) == 0 {
+		os.RemoveAll(tmpDir)
+		return nil, fmt.Errorf("no pages extracted from PDF")
+	}
+
+	return pages, nil
+}
+
+func cleanup(files []string) {
+	for _, f := range files {
+		os.RemoveAll(filepath.Dir(f))
+		break
+	}
 }
 
 func runTesseract(imagePath string) {
@@ -65,29 +142,36 @@ func runTesseract(imagePath string) {
 	}
 }
 
-func runCustomPipeline(imagePath, templatePath string, verbose bool) {
-	data, err := os.ReadFile(imagePath)
+func decodeImage(path string) (interfaces.RGBAImage, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
-		log.Fatal(err)
+		return interfaces.RGBAImage{}, err
 	}
 
 	reader := bytes.NewReader(data)
 	img, _, err := image.Decode(reader)
 	if err != nil {
-		log.Fatal(err)
+		return interfaces.RGBAImage{}, err
 	}
 
 	rgbaImg := image.NewRGBA(img.Bounds())
 	draw.Draw(rgbaImg, rgbaImg.Bounds(), img, img.Bounds().Min, draw.Src)
 
 	bounds := rgbaImg.Bounds()
-	rawImage := interfaces.RGBAImage{
+	return interfaces.RGBAImage{
 		Pix:    rgbaImg.Pix,
 		Stride: rgbaImg.Stride,
 		Bounds: interfaces.Rect{
 			Min: interfaces.Point{X: bounds.Min.X, Y: bounds.Min.Y},
 			Max: interfaces.Point{X: bounds.Max.X, Y: bounds.Max.Y},
 		},
+	}, nil
+}
+
+func runCustomPipeline(imagePath, templatePath string, verbose bool) {
+	rawImage, err := decodeImage(imagePath)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	grayImage := grayscale.ConvertToGrayscale(rawImage)
