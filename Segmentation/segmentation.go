@@ -19,25 +19,19 @@ func Segment(labelImage *interfaces.LabelImage) []Line {
 		return nil
 	}
 
-	sorted := make([]int, len(labelImage.Components))
-	for i := range sorted {
-		sorted[i] = i
-	}
-	sort.Slice(sorted, func(i, j int) bool {
-		ci := labelImage.Components[sorted[i]]
-		cj := labelImage.Components[sorted[j]]
-		if ci.MinY != cj.MinY {
-			return ci.MinY < cj.MinY
-		}
-		return ci.MinX < cj.MinX
-	})
-
-	var items []indexed
-	for _, idx := range sorted {
-		items = append(items, indexed{idx, labelImage.Components[idx]})
+	items := make([]indexed, len(labelImage.Components))
+	for i := range items {
+		items[i] = indexed{idx: i, comp: labelImage.Components[i]}
 	}
 
 	lines := groupLines(items)
+
+	for li := range lines {
+		sort.Slice(lines[li], func(i, j int) bool {
+			return lines[li][i].comp.MinX < lines[li][j].comp.MinX
+		})
+	}
+
 	var result []Line
 	for _, line := range lines {
 		words := groupWords(line)
@@ -57,30 +51,70 @@ func groupLines(items []indexed) [][]indexed {
 		return nil
 	}
 
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].comp.MinY != items[j].comp.MinY {
+			return items[i].comp.MinY < items[j].comp.MinY
+		}
+		return items[i].comp.MinX < items[j].comp.MinX
+	})
+
 	var lines [][]indexed
-	currentLine := []indexed{items[0]}
+	lines = append(lines, []indexed{items[0]})
 
 	for i := 1; i < len(items); i++ {
 		item := items[i]
-		prev := items[i-1]
+		placed := false
 
-		gap := item.comp.MinY - prev.comp.MaxY
-		prevHeight := prev.comp.MaxY - prev.comp.MinY + 1
-		threshold := prevHeight / 2
-		if threshold < 2 {
-			threshold = 2
+		for li := range lines {
+			for _, lineItem := range lines[li] {
+				if verticalOverlap(item.comp, lineItem.comp) {
+					lines[li] = append(lines[li], item)
+					placed = true
+					break
+				}
+			}
+			if placed {
+				break
+			}
 		}
 
-		if gap > threshold {
-			lines = append(lines, currentLine)
-			currentLine = []indexed{item}
-		} else {
-			currentLine = append(currentLine, item)
+		if !placed {
+			lines = append(lines, []indexed{item})
 		}
 	}
-	lines = append(lines, currentLine)
 
 	return lines
+}
+
+func verticalOverlap(a, b interfaces.Component) bool {
+	overlapStart := maxInt(a.MinY, b.MinY)
+	overlapEnd := minInt(a.MaxY, b.MaxY)
+	if overlapStart > overlapEnd {
+		return false
+	}
+	aH := a.MaxY - a.MinY + 1
+	bH := b.MaxY - b.MinY + 1
+	minH := aH
+	if bH < minH {
+		minH = bH
+	}
+	overlapAmount := overlapEnd - overlapStart + 1
+	const minOverlapRatio = 0.3
+	return float64(overlapAmount) >= float64(minH)*minOverlapRatio
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func groupWords(items []indexed) []Word {
