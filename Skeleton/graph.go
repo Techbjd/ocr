@@ -19,10 +19,10 @@ type Node struct {
 }
 
 type Edge struct {
-	From, To   int
-	Length     int
-	Direction  float64
-	Straight   float64
+	From, To  int
+	Length    int
+	Direction float64
+	Straight  float64
 }
 
 type StrokeGraph struct {

@@ -84,7 +84,7 @@ func groupParagraphs(lines []Line, labelImage *interfaces.LabelImage, pageW int)
 }
 
 func lineBottom(line Line, labelImage *interfaces.LabelImage) int {
- maxY := 0
+	maxY := 0
 	for _, word := range line.Words {
 		for _, ci := range word.Components {
 			c := labelImage.Components[ci]
@@ -97,7 +97,7 @@ func lineBottom(line Line, labelImage *interfaces.LabelImage) int {
 }
 
 func lineTop(line Line, labelImage *interfaces.LabelImage) int {
- minY := 1<<31 - 1
+	minY := 1<<31 - 1
 	for _, word := range line.Words {
 		for _, ci := range word.Components {
 			c := labelImage.Components[ci]

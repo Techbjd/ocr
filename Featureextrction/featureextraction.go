@@ -3,8 +3,8 @@ package featureextraction
 import (
 	"math"
 
-	"github.com/Techbjd/ocr/interfaces"
 	"github.com/Techbjd/ocr/Skeleton"
+	"github.com/Techbjd/ocr/interfaces"
 )
 
 type FeatureVector struct {

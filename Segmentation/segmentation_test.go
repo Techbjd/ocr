@@ -3,8 +3,8 @@ package segmentation
 import (
 	"testing"
 
-	"github.com/Techbjd/ocr/interfaces"
 	labeledimage "github.com/Techbjd/ocr/LabeledImage"
+	"github.com/Techbjd/ocr/interfaces"
 )
 
 func makeBinary(pixels [][]uint8) *interfaces.BinaryImage {

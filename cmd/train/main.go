@@ -12,13 +12,13 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Techbjd/ocr/grayscale"
-	"github.com/Techbjd/ocr/interfaces"
+	"github.com/Techbjd/ocr/Classifier"
+	featureextraction "github.com/Techbjd/ocr/Featureextrction"
 	labeledimage "github.com/Techbjd/ocr/LabeledImage"
 	"github.com/Techbjd/ocr/NoiseRemoval"
-	featureextraction "github.com/Techbjd/ocr/Featureextrction"
-	"github.com/Techbjd/ocr/Classifier"
 	"github.com/Techbjd/ocr/Segmentation"
+	"github.com/Techbjd/ocr/grayscale"
+	"github.com/Techbjd/ocr/interfaces"
 )
 
 func main() {

@@ -24,18 +24,27 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		log.Fatal("usage: ocr <image-or-pdf> [templates.json] [-v]")
+		log.Fatal("usage: ocr <image-or-pdf> [templates.json] [-v] [-o output.txt]")
 	}
 
 	inputPath := os.Args[1]
 	verbose := false
 	templatePath := ""
+	outputPath := ""
 
-	for _, arg := range os.Args[2:] {
-		if arg == "-v" || arg == "--verbose" {
+	args := os.Args[2:]
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "-v", "--verbose":
 			verbose = true
-		} else {
-			templatePath = arg
+		case "-o", "--output":
+			if i+1 >= len(args) {
+				log.Fatal("-o requires a file path")
+			}
+			i++
+			outputPath = args[i]
+		default:
+			templatePath = args[i]
 		}
 	}
 
@@ -46,25 +55,43 @@ func main() {
 		}
 		defer cleanup(pages)
 
+		var allOutput strings.Builder
 		for i, pagePath := range pages {
 			if len(pages) > 1 {
-				fmt.Printf("--- Page %d ---\n", i+1)
+				header := fmt.Sprintf("--- Page %d ---\n", i+1)
+				fmt.Print(header)
+				allOutput.WriteString(header)
 			}
+			var text string
 			if templatePath == "" {
-				runTesseract(pagePath)
+				text = getTesseractText(pagePath)
 			} else {
-				runCustomPipeline(pagePath, templatePath, verbose)
+				text = getCustomPipelineText(pagePath, templatePath, verbose)
 			}
+			fmt.Println(text)
+			allOutput.WriteString(text)
+			allOutput.WriteString("\n")
+		}
+		if outputPath != "" {
+			os.WriteFile(outputPath, []byte(allOutput.String()), 0644)
 		}
 		return
 	}
 
 	if templatePath == "" {
-		runTesseract(inputPath)
+		text := getTesseractText(inputPath)
+		fmt.Println(text)
+		if outputPath != "" {
+			os.WriteFile(outputPath, []byte(text+"\n"), 0644)
+		}
 		return
 	}
 
-	runCustomPipeline(inputPath, templatePath, verbose)
+	text := getCustomPipelineText(inputPath, templatePath, verbose)
+	fmt.Println(text)
+	if outputPath != "" {
+		os.WriteFile(outputPath, []byte(text+"\n"), 0644)
+	}
 }
 
 func isPDF(path string) bool {
@@ -123,7 +150,7 @@ func cleanup(files []string) {
 	}
 }
 
-func runTesseract(imagePath string) {
+func getTesseractText(imagePath string) string {
 	cmd := exec.Command("tesseract", imagePath, "stdout", "-l", "eng+nep", "--psm", "3")
 	var out bytes.Buffer
 	var stderr bytes.Buffer
@@ -136,10 +163,9 @@ func runTesseract(imagePath string) {
 
 	text := strings.TrimSpace(out.String())
 	if text == "" {
-		fmt.Println("(no text detected)")
-	} else {
-		fmt.Println(text)
+		return "(no text detected)"
 	}
+	return text
 }
 
 func decodeImage(path string) (interfaces.RGBAImage, error) {
@@ -168,7 +194,7 @@ func decodeImage(path string) (interfaces.RGBAImage, error) {
 	}, nil
 }
 
-func runCustomPipeline(imagePath, templatePath string, verbose bool) {
+func getCustomPipelineText(imagePath, templatePath string, verbose bool) string {
 	rawImage, err := decodeImage(imagePath)
 	if err != nil {
 		log.Fatal(err)
@@ -195,15 +221,16 @@ func runCustomPipeline(imagePath, templatePath string, verbose bool) {
 
 	page := segmentation.AnalyzeLayout(labelImage)
 
-	fmt.Println("--- Detected Text ---")
+	var buf strings.Builder
+	buf.WriteString("--- Detected Text ---\n")
 	for pi, para := range page.Paragraphs {
 		if pi > 0 {
-			fmt.Println()
+			buf.WriteString("\n")
 		}
 		for _, line := range para.Lines {
 			for wordIdx, word := range line.Words {
 				if wordIdx > 0 {
-					fmt.Print(" ")
+					buf.WriteString(" ")
 				}
 				var wordRunes []rune
 				for _, compIdx := range word.Components {
@@ -212,12 +239,12 @@ func runCustomPipeline(imagePath, templatePath string, verbose bool) {
 					_ = score
 				}
 				corrected := contextualCorrectWord(string(wordRunes))
-				fmt.Print(corrected)
+				buf.WriteString(corrected)
 			}
-			fmt.Println()
+			buf.WriteString("\n")
 		}
 	}
-	fmt.Println("--- End ---")
+	buf.WriteString("--- End ---\n")
 
 	if verbose {
 		fmt.Printf("\n--- Page Layout ---\n")
@@ -254,6 +281,8 @@ func runCustomPipeline(imagePath, templatePath string, verbose bool) {
 			}
 		}
 	}
+
+	return buf.String()
 }
 
 func contextualCorrectWord(word string) string {

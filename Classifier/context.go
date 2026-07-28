@@ -167,7 +167,7 @@ func wordLikelihoodPenalty(left, right string, ch rune) float64 {
 	full := left + string(ch)
 	lower := strings.ToLower(full)
 
-	for w := range 	CommonWords {
+	for w := range CommonWords {
 		if strings.HasSuffix(lower, w) {
 			penalty -= 3.0
 			break
@@ -175,7 +175,7 @@ func wordLikelihoodPenalty(left, right string, ch rune) float64 {
 	}
 
 	_ = right
-	_ = 	CommonWords
+	_ = CommonWords
 
 	return penalty
 }
@@ -183,7 +183,7 @@ func wordLikelihoodPenalty(left, right string, ch rune) float64 {
 func WordLookupScore(word string) float64 {
 	lower := strings.ToLower(word)
 
-	if _, ok := 	CommonWords[lower]; ok {
+	if _, ok := CommonWords[lower]; ok {
 		return -5.0
 	}
 

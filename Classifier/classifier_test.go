@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	featureextraction "github.com/Techbjd/ocr/Featureextrction"
-	"github.com/Techbjd/ocr/interfaces"
 	"github.com/Techbjd/ocr/LabeledImage"
+	"github.com/Techbjd/ocr/interfaces"
 )
 
 func makeBinary(pixels [][]uint8) *interfaces.BinaryImage {

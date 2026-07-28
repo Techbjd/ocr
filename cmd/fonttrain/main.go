@@ -16,10 +16,10 @@ import (
 
 	"github.com/Techbjd/ocr/Classifier"
 	featureextraction "github.com/Techbjd/ocr/Featureextrction"
-	"github.com/Techbjd/ocr/grayscale"
-	"github.com/Techbjd/ocr/interfaces"
 	labeledimage "github.com/Techbjd/ocr/LabeledImage"
 	noiseremoval "github.com/Techbjd/ocr/NoiseRemoval"
+	"github.com/Techbjd/ocr/grayscale"
+	"github.com/Techbjd/ocr/interfaces"
 )
 
 const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
