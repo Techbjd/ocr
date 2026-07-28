@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"image"
 	"image/draw"
+	_ "image/jpeg"
+	_ "image/png"
 	"log"
 	"os"
 	"strings"
@@ -58,19 +60,22 @@ func main() {
 	denoised := noiseremoval.RemoveNoise(binaryImage)
 	labelImage := labeledimage.CCLFloodFill(denoised)
 
-	var store *classifier.TemplateStore
+	var sigStore *classifier.SignatureStore
 	if templatePath != "" {
-		store, err = classifier.LoadTemplates(templatePath)
+		sigStore, err = classifier.LoadSignatures(templatePath)
 		if err != nil {
-			log.Printf("No templates loaded: %v", err)
+			log.Printf("No signatures loaded: %v", err)
 		} else {
-			log.Printf("Loaded %d templates from %s", len(store.Templates), templatePath)
+			log.Printf("Loaded %d signatures from %s", len(sigStore.Entries), templatePath)
 		}
 	}
 
 	vectors := make([]featureextraction.FeatureVector, len(labelImage.Components))
+	sigs := make([]classifier.CharacterSignature, len(labelImage.Components))
 	for i, comp := range labelImage.Components {
-		vectors[i] = featureextraction.Extract(denoised, &comp)
+		fv := featureextraction.Extract(denoised, &comp)
+		vectors[i] = fv
+		sigs[i] = classifier.FromFeatureVector(fv, 0)
 	}
 
 	page := segmentation.AnalyzeLayout(labelImage)
@@ -87,10 +92,10 @@ func main() {
 				}
 				var wordRunes []rune
 				for _, compIdx := range word.Components {
-					fv := vectors[compIdx]
-					if store != nil {
-						match := store.Classify(fv)
-						wordRunes = append(wordRunes, match.Char)
+					if sigStore != nil {
+						ch, score := sigStore.Classify(sigs[compIdx])
+						wordRunes = append(wordRunes, ch)
+						_ = score
 					} else {
 						wordRunes = append(wordRunes, '?')
 					}
