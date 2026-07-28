@@ -21,11 +21,16 @@ func ComputeChainCode(g *interfaces.BinaryImage, comp *interfaces.Component) []u
 	backtrackDir := 4
 	currentX, currentY := startX, startY
 
-	type state struct{ x, y, bd int }
-	seen := map[state]bool{}
-	seen[state{startX, startY, backtrackDir}] = true
+	bw := comp.MaxX - comp.MinX + 1
+	bh := comp.MaxY - comp.MinY + 1
 
-	maxIter := comp.Area*4 + (comp.MaxX-comp.MinX+comp.MaxY-comp.MinY)*2 + 8
+	visited := make([]int8, bw*bh)
+	for i := range visited {
+		visited[i] = -1
+	}
+	visited[(startY-comp.MinY)*bw+(startX-comp.MinX)] = int8(backtrackDir)
+
+	maxIter := (bw + bh) * 4
 	if maxIter < 100 {
 		maxIter = 100
 	}
@@ -56,22 +61,22 @@ func ComputeChainCode(g *interfaces.BinaryImage, comp *interfaces.Component) []u
 			break
 		}
 
-		s := state{currentX, currentY, backtrackDir}
-		if seen[s] && currentX == startX && currentY == startY {
+		vy := currentY - comp.MinY
+		vx := currentX - comp.MinX
+		if currentX == startX && currentY == startY && visited[vy*bw+vx] == int8(backtrackDir) {
 			break
 		}
-		seen[s] = true
+		visited[vy*bw+vx] = int8(backtrackDir)
 	}
 
 	return chainCode
 }
 
 func findBoundaryStart(g *interfaces.BinaryImage, comp *interfaces.Component, width, height int) (int, int) {
-	for y := comp.MinY; y <= comp.MaxY; y++ {
-		for x := comp.MinX; x <= comp.MaxX; x++ {
-			if x < 0 || x >= width || y < 0 || y >= height {
-				continue
-			}
+	minX, maxX := comp.MinX, comp.MaxX
+	minY, maxY := comp.MinY, comp.MaxY
+	for y := minY; y <= maxY; y++ {
+		for x := minX; x <= maxX; x++ {
 			if g.Pix[y*g.Stride+x] != 0 {
 				continue
 			}

@@ -4,6 +4,11 @@ import (
 	"github.com/Techbjd/ocr/interfaces"
 )
 
+var cclDirs = [8][2]int{
+	{1, 0}, {-1, 0}, {0, 1}, {0, -1},
+	{1, 1}, {-1, -1}, {-1, 1}, {1, -1},
+}
+
 func CCLFloodFill(g *interfaces.BinaryImage) *interfaces.LabelImage {
 	width := g.Rect.Max.X - g.Rect.Min.X
 	height := g.Rect.Max.Y - g.Rect.Min.Y
@@ -12,11 +17,6 @@ func CCLFloodFill(g *interfaces.BinaryImage) *interfaces.LabelImage {
 		Labels: make([]int, len(g.Pix)),
 		Stride: g.Stride,
 		Rect:   g.Rect,
-	}
-
-	dirs := [8][2]int{
-		{1, 0}, {-1, 0}, {0, 1}, {0, -1},
-		{1, 1}, {-1, -1}, {-1, 1}, {1, -1},
 	}
 
 	var currentLabel int = 1
@@ -42,7 +42,12 @@ func CCLFloodFill(g *interfaces.BinaryImage) *interfaces.LabelImage {
 				comp.Vertical[x] = 1
 				labelImage.Labels[index] = currentLabel
 
-				queue := []int{index}
+				queueCap := width * height / 4
+				if queueCap < 8 {
+					queueCap = 8
+				}
+				queue := make([]int, 1, queueCap)
+				queue[0] = index
 				head := 0
 
 				for head < len(queue) {
@@ -52,7 +57,7 @@ func CCLFloodFill(g *interfaces.BinaryImage) *interfaces.LabelImage {
 					cx := idx % g.Stride
 					cy := idx / g.Stride
 
-					for _, d := range dirs {
+					for _, d := range cclDirs {
 						nx, ny := cx+d[0], cy+d[1]
 
 						if nx >= 0 && nx < width && ny >= 0 && ny < height {
