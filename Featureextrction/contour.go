@@ -1,5 +1,7 @@
 package featureextraction
 
+import "math"
+
 type ContourStats struct {
 	Corners          int
 	DirectionChanges int
@@ -52,7 +54,7 @@ func computeContourStats(chain []uint8, perimeter int) ContourStats {
 
 	if perimeter > 0 {
 		p := float64(perimeter)
-		stats.Compactness = 4.0 * 3.14159265 * float64(len(chain)) / (p * p)
+		stats.Compactness = 4.0 * math.Pi * float64(len(chain)) / (p * p)
 	}
 
 	return stats

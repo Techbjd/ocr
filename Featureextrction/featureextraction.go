@@ -85,17 +85,23 @@ func Extract(g *interfaces.BinaryImage, comp *interfaces.Component) FeatureVecto
 	fv.Holes = computeHoles(g, comp)
 	fv.EulerNumber = 1 - fv.Holes
 
-	bw := comp.MaxX - comp.MinX + 1
-	bh := comp.MaxY - comp.MinY + 1
+	stride := g.Stride
+	pix := g.Pix
+	minX := comp.MinX
+	minY := comp.MaxY - comp.MinY + 1
+	bw := comp.MaxX - minX + 1
+	bh := minY
 	masked := &interfaces.BinaryImage{
 		Pix:    make([]uint8, bw*bh),
 		Stride: bw,
 		Rect:   interfaces.Rect{Min: interfaces.Point{X: 0, Y: 0}, Max: interfaces.Point{X: bw, Y: bh}},
 	}
 	for y := comp.MinY; y <= comp.MaxY; y++ {
-		for x := comp.MinX; x <= comp.MaxX; x++ {
-			if g.Pix[y*g.Stride+x] == 0 {
-				masked.Pix[(y-comp.MinY)*bw+(x-comp.MinX)] = 0
+		srcRow := y*stride + minX
+		dstOff := (y - comp.MinY) * bw
+		for x := 0; x < bw; x++ {
+			if pix[srcRow+x] == 0 {
+				masked.Pix[dstOff+x] = 0
 			}
 		}
 	}
