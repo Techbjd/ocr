@@ -29,6 +29,27 @@ func Recognize(fv featureextraction.FeatureVector, database []Template) Match {
 	return best
 }
 
+func CompareSignatures(unknown CharacterSignature, database []CharacterSignature) (rune, float64) {
+	cfg := DefaultConfig
+	weights := DefaultWeights
+
+	best := rune('?')
+	bestScore := -1.0
+
+	for _, known := range database {
+		if !cfg.HardFilter(unknown, known) {
+			continue
+		}
+		score := weights.SoftScore(unknown, known)
+		if score > bestScore {
+			bestScore = score
+			best = known.Character
+		}
+	}
+
+	return best, bestScore
+}
+
 func distance(a, b featureextraction.FeatureVector) float64 {
 	score := 0.0
 
