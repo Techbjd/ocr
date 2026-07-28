@@ -96,18 +96,26 @@ func FromFeatureVector(fv featureextraction.FeatureVector, char rune) CharacterS
 
 type SignatureStore struct {
 	Entries []CharacterSignature `json:"entries"`
+	byHoles map[int][]CharacterSignature
 }
 
 func NewSignatureStore() *SignatureStore {
-	return &SignatureStore{}
+	return &SignatureStore{
+		byHoles: make(map[int][]CharacterSignature),
+	}
 }
 
 func (ss *SignatureStore) Add(sig CharacterSignature) {
 	ss.Entries = append(ss.Entries, sig)
+	ss.byHoles[sig.Holes] = append(ss.byHoles[sig.Holes], sig)
 }
 
 func (ss *SignatureStore) Classify(unknown CharacterSignature) (rune, float64) {
-	return CompareSignatures(unknown, ss.Entries)
+	candidates := ss.byHoles[unknown.Holes]
+	if len(candidates) == 0 {
+		return '?', -1
+	}
+	return CompareSignatures(unknown, candidates)
 }
 
 func (ss *SignatureStore) Save(path string) error {
@@ -126,6 +134,11 @@ func LoadSignatures(path string) (*SignatureStore, error) {
 	var ss SignatureStore
 	if err := json.Unmarshal(data, &ss); err != nil {
 		return nil, err
+	}
+	ss.byHoles = make(map[int][]CharacterSignature)
+	for i := range ss.Entries {
+		h := ss.Entries[i].Holes
+		ss.byHoles[h] = append(ss.byHoles[h], ss.Entries[i])
 	}
 	return &ss, nil
 }
