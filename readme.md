@@ -1,6 +1,40 @@
 # OCR Engine
 
-A classical OCR engine built from scratch in Go. No external OCR libraries — every algorithm is implemented manually.
+A classical OCR engine built from scratch in Go with a Tesseract fallback for production use.
+
+## Quick Start
+
+```bash
+# Default: uses Tesseract OCR (requires tesseract-ocr installed)
+go run ./cmd/main.go image.png
+
+# Custom pipeline with trained signatures
+go run ./cmd/main.go image.png templates.json
+
+# Verbose component details
+go run ./cmd/main.go image.png templates.json -v
+```
+
+**Default behavior** passes the image directly to Tesseract CLI (`tesseract <image> stdout -l eng+nep`). No setup required.
+
+**Custom pipeline** (with `templates.json`) runs the full classical OCR pipeline:
+grayscale → thresholding → denoising → CCL → feature extraction → skeleton → graph → two-stage classifier.
+
+## Version Control
+
+The repository tracks the full evolution of the engine:
+
+| Reference | Description | How to Get |
+|-----------|-------------|------------|
+| `v0.1.0-initial` | Initial legacy code — basic preprocessing only | `git checkout v0.1.0-initial` |
+| `main` (before perf/* commits) | Complete pre-optimization pipeline | `git checkout a0f43d4` |
+| `main` (HEAD) | Current: optimized + Tesseract fallback | `git clone <url>` |
+
+Tag the initial commit:
+```bash
+git tag v0.1.0-initial 5bc796f
+git push --tags
+```
 
 ## Architecture
 
@@ -247,11 +281,20 @@ Groups lines into paragraphs using:
 
 ### `cmd/main.go`
 
-Full OCR pipeline. Usage:
+**Two modes:**
 
-```
-go run ./cmd/main.go <image> <signatures.json>
-```
+1. **Tesseract mode** (default) — passes image directly to Tesseract CLI.
+   ```
+   go run ./cmd/main.go <image>
+   ```
+
+2. **Custom pipeline mode** — runs the classical OCR pipeline with trained signatures.
+   ```
+   go run ./cmd/main.go <image> <signatures.json>
+   go run ./cmd/main.go <image> <signatures.json> -v   # verbose component details
+   ```
+
+Requires `tesseract-ocr` installed for default mode.
 
 ### `cmd/fonttrain`
 
@@ -322,6 +365,7 @@ Test coverage includes:
 
 ## Dependencies
 
-- Go standard library (image, image/draw, image/jpeg, image/png, encoding/json)
+- Go standard library
 - `golang.org/x/image` — font rendering for training tool
-- Zero external OCR libraries
+- `tesseract-ocr` — for default recognition mode (optional, only for `ocr <image>`)
+- Zero external OCR libraries for the custom pipeline
