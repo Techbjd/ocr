@@ -11,7 +11,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/Techbjd/ocr/Classifier"
 	featureextraction "github.com/Techbjd/ocr/Featureextrction"
@@ -168,6 +170,37 @@ func getTesseractText(imagePath string) string {
 	return text
 }
 
+func extractAll(g *interfaces.BinaryImage, comps []interfaces.Component) []featureextraction.FeatureVector {
+	n := len(comps)
+	vectors := make([]featureextraction.FeatureVector, n)
+
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+
+	workers := runtime.NumCPU()
+	if workers > n {
+		workers = n
+	}
+
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				vectors[i] = featureextraction.Extract(g, &comps[i])
+			}
+		}()
+	}
+
+	for i := 0; i < n; i++ {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+
+	return vectors
+}
+
 func decodeImage(path string) (interfaces.RGBAImage, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -211,11 +244,9 @@ func getCustomPipelineText(imagePath, templatePath string, verbose bool) string 
 	}
 	log.Printf("Loaded %d signatures from %s", len(sigStore.Entries), templatePath)
 
-	vectors := make([]featureextraction.FeatureVector, len(labelImage.Components))
+	vectors := extractAll(denoised, labelImage.Components)
 	sigs := make([]classifier.CharacterSignature, len(labelImage.Components))
-	for i, comp := range labelImage.Components {
-		fv := featureextraction.Extract(denoised, &comp)
-		vectors[i] = fv
+	for i, fv := range vectors {
 		sigs[i] = classifier.FromFeatureVector(fv, 0)
 	}
 
