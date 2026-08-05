@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
 	"image"
 	"image/draw"
 	_ "image/jpeg"
 	_ "image/png"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -31,15 +33,31 @@ type stageResult struct {
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		log.Fatal("usage: benchmark <image-or-pdf> [templates.json]")
+	fs := flag.NewFlagSet("benchmark", flag.ExitOnError)
+	outPath := fs.String("o", "", "write report to this file")
+	fs.StringVar(outPath, "output", "", "write report to this file")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "usage: benchmark <image-or-pdf> [templates.json] [-o output.md]\n")
+		fs.PrintDefaults()
 	}
 
-	inputPath := os.Args[1]
-	templatePath := ""
-	if len(os.Args) >= 3 {
-		templatePath = os.Args[2]
+	flags, positional := splitFlags(os.Args[1:])
+	if err := fs.Parse(flags); err != nil {
+		os.Exit(2)
 	}
+	if len(positional) < 1 {
+		fs.Usage()
+		os.Exit(2)
+	}
+
+	inputPath := positional[0]
+	templatePath := ""
+	if len(positional) >= 2 {
+		templatePath = positional[1]
+	}
+
+	var report bytes.Buffer
+	w := io.MultiWriter(os.Stdout, &report)
 
 	if isPDF(inputPath) {
 		pages, err := pdfToImages(inputPath)
@@ -49,22 +67,60 @@ func main() {
 		defer cleanup(pages)
 
 		for i, pagePath := range pages {
-			fmt.Printf("=== Page %d ===\n", i+1)
+			fmt.Fprintf(w, "=== Page %d ===\n", i+1)
 			if templatePath == "" {
-				benchmarkTesseract(pagePath)
+				benchmarkTesseract(w, pagePath)
 			} else {
-				benchmarkPipeline(pagePath, templatePath)
+				benchmarkPipeline(w, pagePath, templatePath)
 			}
-			fmt.Println()
+			fmt.Fprintln(w)
 		}
-		return
+	} else {
+		if templatePath == "" {
+			benchmarkTesseract(w, inputPath)
+		} else {
+			benchmarkPipeline(w, inputPath, templatePath)
+		}
 	}
 
-	if templatePath == "" {
-		benchmarkTesseract(inputPath)
-	} else {
-		benchmarkPipeline(inputPath, templatePath)
+	if *outPath != "" {
+		if err := os.WriteFile(*outPath, report.Bytes(), 0644); err != nil {
+			log.Fatalf("failed to write report: %v", err)
+		}
 	}
+}
+
+// flagName strips leading dashes and any =value from a flag argument.
+func flagName(arg string) string {
+	name := arg
+	for len(name) > 1 && name[0] == '-' {
+		name = name[1:]
+	}
+	if i := strings.IndexByte(name, '='); i >= 0 {
+		name = name[:i]
+	}
+	return name
+}
+
+// splitFlags hoists flag arguments (and their values) ahead of positional
+// arguments. Go's flag package stops parsing at the first non-flag argument,
+// but callers often pass -o after the positionals (e.g.
+// `benchmark img.pdf -o out.md`), so flags must be collected from anywhere.
+func splitFlags(args []string) (flags, positionals []string) {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if len(arg) <= 1 || arg[0] != '-' {
+			positionals = append(positionals, arg)
+			continue
+		}
+		flags = append(flags, arg)
+		name := flagName(arg)
+		if (name == "o" || name == "output") && !strings.Contains(arg, "=") && i+1 < len(args) {
+			i++
+			flags = append(flags, args[i])
+		}
+	}
+	return flags, positionals
 }
 
 func isPDF(path string) bool {
@@ -145,7 +201,7 @@ func measure(name string, fn func()) stageResult {
 	return stageResult{name: name, duration: elapsed, allocMB: alloc}
 }
 
-func benchmarkTesseract(imagePath string) {
+func benchmarkTesseract(w io.Writer, imagePath string) {
 	start := time.Now()
 
 	var out bytes.Buffer
@@ -167,17 +223,17 @@ func benchmarkTesseract(imagePath string) {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 
-	fmt.Printf("  Tesseract OCR:     %v\n", tesseractTime)
-	fmt.Printf("  Total:             %v\n", totalTime)
-	fmt.Printf("  Characters:        %d\n", charCount)
-	fmt.Printf("  Memory (heap):     %.1f MB\n", float64(m.HeapInuse)/1024/1024)
+	fmt.Fprintf(w, "  Tesseract OCR:     %v\n", tesseractTime)
+	fmt.Fprintf(w, "  Total:             %v\n", totalTime)
+	fmt.Fprintf(w, "  Characters:        %d\n", charCount)
+	fmt.Fprintf(w, "  Memory (heap):     %.1f MB\n", float64(m.HeapInuse)/1024/1024)
 	if totalTime.Seconds() > 0 {
-		fmt.Printf("  Throughput:        %.1f chars/sec\n", float64(charCount)/totalTime.Seconds())
-		fmt.Printf("                     %.1f images/sec\n", 1/totalTime.Seconds())
+		fmt.Fprintf(w, "  Throughput:        %.1f chars/sec\n", float64(charCount)/totalTime.Seconds())
+		fmt.Fprintf(w, "                     %.1f images/sec\n", 1/totalTime.Seconds())
 	}
 }
 
-func benchmarkPipeline(imagePath, templatePath string) {
+func benchmarkPipeline(w io.Writer, imagePath, templatePath string) {
 	data, err := os.ReadFile(imagePath)
 	if err != nil {
 		log.Fatal(err)
@@ -193,8 +249,8 @@ func benchmarkPipeline(imagePath, templatePath string) {
 	})
 
 	bounds := img.Bounds()
-	w := bounds.Dx()
-	h := bounds.Dy()
+	imgW := bounds.Dx()
+	imgH := bounds.Dy()
 
 	var rgbaImg *image.RGBA
 	measure("RGBA Convert", func() {
@@ -268,25 +324,25 @@ func benchmarkPipeline(imagePath, templatePath string) {
 	runtime.ReadMemStats(&m)
 	peakHeap := float64(m.HeapInuse) / 1024 / 1024
 
-	fmt.Printf("\nImage: %s (%dx%d)\n", imagePath, w, h)
-	fmt.Printf("Components: %d\n", len(labelImage.Components))
-	fmt.Printf("Templates:  %d\n", len(sigStore.Entries))
-	fmt.Println()
+	fmt.Fprintf(w, "\nImage: %s (%dx%d)\n", imagePath, imgW, imgH)
+	fmt.Fprintf(w, "Components: %d\n", len(labelImage.Components))
+	fmt.Fprintf(w, "Templates:  %d\n", len(sigStore.Entries))
+	fmt.Fprintln(w)
 
-	fmt.Printf("  %-20s %12s %10s\n", "Stage", "Time", "Alloc")
-	fmt.Printf("  %s\n", strings.Repeat("-", 44))
+	fmt.Fprintf(w, "  %-20s %12s %10s\n", "Stage", "Time", "Alloc")
+	fmt.Fprintf(w, "  %s\n", strings.Repeat("-", 44))
 	for _, r := range results {
 		totalTime += r.duration
 		totalAlloc += r.allocMB
-		fmt.Printf("  %-20s %12v %8.2f MB\n", r.name, r.duration.Round(time.Millisecond), r.allocMB)
+		fmt.Fprintf(w, "  %-20s %12v %8.2f MB\n", r.name, r.duration.Round(time.Millisecond), r.allocMB)
 	}
-	fmt.Printf("  %s\n", strings.Repeat("-", 44))
-	fmt.Printf("  %-20s %12v %8.2f MB\n", "Total", totalTime.Round(time.Millisecond), totalAlloc)
+	fmt.Fprintf(w, "  %s\n", strings.Repeat("-", 44))
+	fmt.Fprintf(w, "  %-20s %12v %8.2f MB\n", "Total", totalTime.Round(time.Millisecond), totalAlloc)
 
-	fmt.Printf("\n  Peak Heap:          %.1f MB\n", peakHeap)
+	fmt.Fprintf(w, "\n  Peak Heap:          %.1f MB\n", peakHeap)
 	if totalTime.Seconds() > 0 {
-		fmt.Printf("  Throughput:         %.1f images/sec\n", 1/totalTime.Seconds())
-		fmt.Printf("                      %.1f components/sec\n",
+		fmt.Fprintf(w, "  Throughput:         %.1f images/sec\n", 1/totalTime.Seconds())
+		fmt.Fprintf(w, "                      %.1f components/sec\n",
 			float64(len(labelImage.Components))/totalTime.Seconds())
 	}
 }

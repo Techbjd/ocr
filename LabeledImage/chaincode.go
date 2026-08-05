@@ -44,7 +44,13 @@ func ComputeChainCode(g *interfaces.BinaryImage, comp *interfaces.Component) []u
 			dir := (backtrackDir + i) % 8
 			nx, ny := currentX+chainDirs[dir][0], currentY+chainDirs[dir][1]
 
+			// Stay inside both the global image and this component's bbox so
+			// visited[] indices (relative to comp.MinX/MinY) always stay in
+			// range. Two diagonally-touching components must not cross over.
 			if nx < 0 || nx >= width || ny < 0 || ny >= height {
+				continue
+			}
+			if nx < comp.MinX || nx > comp.MaxX || ny < comp.MinY || ny > comp.MaxY {
 				continue
 			}
 			if g.Pix[ny*g.Stride+nx] == 0 {
@@ -63,6 +69,9 @@ func ComputeChainCode(g *interfaces.BinaryImage, comp *interfaces.Component) []u
 
 		vy := currentY - comp.MinY
 		vx := currentX - comp.MinX
+		if vy < 0 || vy >= bh || vx < 0 || vx >= bw {
+			break
+		}
 		if currentX == startX && currentY == startY && visited[vy*bw+vx] == int8(backtrackDir) {
 			break
 		}
