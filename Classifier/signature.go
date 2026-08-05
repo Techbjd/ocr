@@ -94,28 +94,74 @@ func FromFeatureVector(fv featureextraction.FeatureVector, char rune) CharacterS
 	}
 }
 
+const DefaultCacheSize = 4096
+
 type SignatureStore struct {
 	Entries []CharacterSignature `json:"entries"`
-	byHoles map[int][]CharacterSignature
+
+	index *sigIndex
+	cache *resultCache
+	cfg   ClassifierConfig
+}
+
+func (ss *SignatureStore) rebuild() {
+	ss.index = newSigIndex()
+	for i := range ss.Entries {
+		ss.index.add(&ss.Entries[i])
+	}
 }
 
 func NewSignatureStore() *SignatureStore {
-	return &SignatureStore{
-		byHoles: make(map[int][]CharacterSignature),
+	ss := &SignatureStore{
+		index: newSigIndex(),
+		cache: newResultCache(DefaultCacheSize),
+		cfg:   DefaultConfig,
 	}
+	return ss
 }
 
 func (ss *SignatureStore) Add(sig CharacterSignature) {
 	ss.Entries = append(ss.Entries, sig)
-	ss.byHoles[sig.Holes] = append(ss.byHoles[sig.Holes], sig)
+	ss.index.add(&ss.Entries[len(ss.Entries)-1])
 }
 
+// Classify recognizes the unknown glyph using the composite bucket index and
+// an LRU result cache. Repeated glyphs are answered in O(1) from the cache;
+// otherwise only the few structural candidates are scored.
 func (ss *SignatureStore) Classify(unknown CharacterSignature) (rune, float64) {
-	candidates := ss.byHoles[unknown.Holes]
-	if len(candidates) == 0 {
+	if ss.index == nil || len(ss.index.buckets) == 0 {
 		return '?', -1
 	}
-	return CompareSignatures(unknown, candidates)
+
+	key := cacheKey(unknown)
+	if ch, score, ok := ss.cache.get(key); ok {
+		return ch, score
+	}
+
+	dedup := make(map[*CharacterSignature]struct{}, 16)
+	candidates := ss.index.candidates(unknown, ss.cfg, dedup)
+	if len(candidates) == 0 {
+		ss.cache.set(key, '?', -1)
+		return '?', -1
+	}
+
+	weights := DefaultWeights
+	best := rune('?')
+	bestScore := -1.0
+
+	for _, c := range candidates {
+		if !ss.cfg.HardFilter(unknown, *c) {
+			continue
+		}
+		score := weights.SoftScore(unknown, *c)
+		if score > bestScore {
+			bestScore = score
+			best = c.Character
+		}
+	}
+
+	ss.cache.set(key, best, bestScore)
+	return best, bestScore
 }
 
 func (ss *SignatureStore) Save(path string) error {
@@ -127,18 +173,23 @@ func (ss *SignatureStore) Save(path string) error {
 }
 
 func LoadSignatures(path string) (*SignatureStore, error) {
+	ss := NewSignatureStore()
+	if err := ss.Load(path); err != nil {
+		return nil, err
+	}
+	return ss, nil
+}
+
+func (ss *SignatureStore) Load(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	var ss SignatureStore
-	if err := json.Unmarshal(data, &ss); err != nil {
-		return nil, err
+	var loaded SignatureStore
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		return err
 	}
-	ss.byHoles = make(map[int][]CharacterSignature)
-	for i := range ss.Entries {
-		h := ss.Entries[i].Holes
-		ss.byHoles[h] = append(ss.byHoles[h], ss.Entries[i])
-	}
-	return &ss, nil
+	ss.Entries = loaded.Entries
+	ss.rebuild()
+	return nil
 }
