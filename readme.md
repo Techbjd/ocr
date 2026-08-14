@@ -540,7 +540,7 @@ This library is the only pure-Go, dependency-free OCR implementation in the Go e
 
 ## License
 
-No license is currently applied — all rights reserved by default. This means the code is viewable but not licensed for use, modification, or redistribution without explicit permission. A license will be added in the future.
+MIT License — see [LICENSE](LICENSE) for details.
 
 ## Contributing
 
