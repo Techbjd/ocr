@@ -126,6 +126,124 @@ Document Layout Analysis
 Output Text
 ```
 
+## Library API
+
+The library can be used as a Go dependency. Import the root package for the high-level API, or import individual sub-packages for granular control.
+
+### Installation
+
+```bash
+go get github.com/Techbjd/ocr
+```
+
+### High-Level API
+
+The root package (`github.com/Techbjd/ocr`) exposes two entry points:
+
+#### `ocr.Recognize(imagePath, signaturePath string) (ocr.Result, error)`
+
+Convenience function that loads an image file and a signature store from disk, then runs the full pipeline.
+
+```go
+result, err := ocr.Recognize("document.png", "signatures.json")
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Println(result.Text)
+```
+
+#### `ocr.Process(img interfaces.RGBAImage, sigStore *classifier.SignatureStore) (ocr.Result, error)`
+
+Runs the full pipeline on an already-decoded in-memory image. Useful when the image is decoded or generated in memory, or when you want to reuse a signature store across multiple images.
+
+```go
+img, err := ocr.DecodeFile("document.png")
+if err != nil {
+    log.Fatal(err)
+}
+
+sigStore, err := classifier.LoadSignatures("signatures.json")
+if err != nil {
+    log.Fatal(err)
+}
+
+result, err := ocr.Process(img, sigStore)
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Println(result.Text)
+```
+
+#### `ocr.DecodeFile(path string) (interfaces.RGBAImage, error)`
+
+Decodes a PNG/JPEG file into the in-memory `RGBAImage` representation used by `Process`.
+
+#### `ocr.Result`
+
+```go
+type Result struct {
+    Text       string                              // reconstructed document text
+    Page       segmentation.Page                   // layout analysis (paragraphs, lines, words)
+    Vectors    []featureextraction.FeatureVector   // per-glyph feature descriptors
+    Components []interfaces.Component                // per-glyph connected components
+}
+```
+
+### Granular Package API
+
+Each pipeline stage is independently importable and usable:
+
+```go
+import (
+    "github.com/Techbjd/ocr/grayscale"
+    labeledimage "github.com/Techbjd/ocr/LabeledImage"
+    "github.com/Techbjd/ocr/NoiseRemoval"
+    featureextraction "github.com/Techbjd/ocr/Featureextrction"
+    "github.com/Techbjd/ocr/Classifier"
+    "github.com/Techbjd/ocr/Segmentation"
+    "github.com/Techbjd/ocr/interfaces"
+)
+```
+
+**Stage-by-stage usage:**
+
+1. Decode image → `interfaces.RGBAImage`
+2. Grayscale: `grayscale.ConvertToGrayscale(rgba)` → `interfaces.GrayscaleImage`
+3. Threshold: `grayscale.ThresholdToBinaryImage(gray)` → `interfaces.BinaryImage`
+4. Denoise: `NoiseRemoval.RemoveNoise(bin)` → `interfaces.BinaryImage`
+5. Label: `labeledimage.CCLFloodFill(den)` → `interfaces.LabelImage` (with `Components`)
+6. Extract features: `featureextraction.Extract(bin, &comp)` → `featureextraction.FeatureVector`
+7. Classify: `sigStore.Classify(sig)` → `(rune, float64)` (best character + score)
+8. Layout: `segmentation.AnalyzeLayout(labelImg)` → `segmentation.Page`
+
+### Training & Signature Management
+
+Signatures (character feature profiles) are stored as JSON. Use the CLI tools to generate them:
+
+```bash
+# Auto-generate from system fonts
+go run ./cmd/fonttrain/... <fonts-directory> signatures.json
+
+# Interactive training on a specific image
+go run ./cmd/train/... image.png signatures.json
+```
+
+Or manage them programmatically:
+
+```go
+store := classifier.NewSignatureStore()
+
+// Add signatures manually
+store.Add(classifier.FromFeatureVector(fv, 'A'))
+
+// Save / load
+store.Save("signatures.json")
+sigStore, err := classifier.LoadSignatures("signatures.json")
+
+// Classify a character
+ch, score := sigStore.Classify(classifier.FromFeatureVector(fv, 0))
+```
+
 ## Packages
 
 ### `interfaces`
@@ -403,3 +521,33 @@ Test coverage includes:
 - `golang.org/x/image` — font rendering for training tool
 - `tesseract-ocr` — for default recognition mode (optional, only for `ocr <image>`)
 - Zero external OCR libraries for the custom pipeline
+
+## Comparison with Alternatives
+
+| Solution | Approach | Dependencies | Unique Strength |
+|----------|----------|-------------|-----------------|
+| **gosseract** | CGo wrapper around Tesseract C++ | Tesseract native lib + CGo | Industry standard, high accuracy |
+| **go-ocr** (tiagomelo) | CGo wrapper around Tesseract | Tesseract native lib + CGo | Simple API |
+| **gotesseract** | CGo wrapper for Tesseract | Tesseract native lib + CGo | Port of pytesseract |
+| **gogosseract** | Tesseract compiled to WASM | WASM runtime | No native install needed |
+| **This library** | Pure Go, from scratch | None (std library only) | Zero deps, fully self-contained, customizable |
+
+This library is the only pure-Go, dependency-free OCR implementation in the Go ecosystem. While Tesseract-based wrappers offer higher accuracy on clean documents out of the box, this library excels when:
+- You cannot install native C++ dependencies (minimal containers, embedded systems)
+- You need full transparency and control over the OCR pipeline
+- You are working with a specific font and can train signatures from it
+- You want to avoid CGo entirely (simpler builds, easier cross-compilation)
+
+## License
+
+No license is currently applied — all rights reserved by default. This means the code is viewable but not licensed for use, modification, or redistribution without explicit permission. A license will be added in the future.
+
+## Contributing
+
+Contributions are welcome! Please ensure all tests pass:
+
+```bash
+go build ./...
+go vet ./...
+go test ./... -count=1
+```
