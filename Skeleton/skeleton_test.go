@@ -104,7 +104,7 @@ func TestCountNeighbors(t *testing.T) {
 	s := &SkeletonImage{
 		Pix:    pix,
 		Stride: 5,
-		Rect:   interfaces.Rect{Min: interfaces.Point{0, 0}, Max: interfaces.Point{5, 5}},
+		Rect:   interfaces.Rect{Min: interfaces.Point{X: 0, Y: 0}, Max: interfaces.Point{X: 5, Y: 5}},
 	}
 
 	s.Pix[2*5+2] = 0

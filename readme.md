@@ -4,6 +4,8 @@ A classical OCR engine built from scratch in Go with a Tesseract fallback for pr
 
 ## Quick Start
 
+### CLI (Command Line)
+
 ```bash
 # Default: uses Tesseract OCR (requires tesseract-ocr installed)
 go run ./cmd/main.go image.png
@@ -13,12 +15,44 @@ go run ./cmd/main.go image.png templates.json
 
 # Verbose component details
 go run ./cmd/main.go image.png templates.json -v
+
+# Save output to file
+go run ./cmd/main.go image.png templates.json -o output.txt
 ```
 
 **Default behavior** passes the image directly to Tesseract CLI (`tesseract <image> stdout -l eng+nep`). No setup required.
 
 **Custom pipeline** (with `templates.json`) runs the full classical OCR pipeline:
 grayscale → thresholding → denoising → CCL → feature extraction → skeleton → graph → two-stage classifier.
+
+### Library (Go package)
+
+```bash
+go get github.com/Techbjd/ocr
+```
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/Techbjd/ocr"
+)
+
+func main() {
+    // One-shot: load image + signatures from disk, run pipeline
+    result, err := ocr.Recognize("image.png", "signatures.json")
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Println(result.Text)            // reconstructed document text
+    fmt.Println(result.Page.Width)      // page dimensions
+    fmt.Println(len(result.Components)) // number of detected glyphs
+}
+```
+
+See the [Library API](#library-api) section below for full details.
 
 ## Version Control
 
